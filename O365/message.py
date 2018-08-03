@@ -206,6 +206,8 @@ class Message(ApiComponent, AttachableMixin, HandleRecipientsMixin):
         'create_draft_folder': '/mailFolders/{id}/messages',
         'send_mail': '/sendMail',
         'send_draft': '/messages/{id}/send',
+        'reply': '/messages/{id}/reply',
+        'reply_all': '/messages/{id}/replyall',
         'get_message': '/messages/{id}',
         'move_message': '/messages/{id}/move',
         'copy_message': '/messages/{id}/copy',
@@ -434,26 +436,48 @@ class Message(ApiComponent, AttachableMixin, HandleRecipientsMixin):
 
         return message
 
-    def send(self, save_to_sent_folder=True):
-        """ Sends this message. """
+    def reply(self, response, to_all=False):
+        """ Reply all to a message, prepending response and maintaining the rest
+        of the email trail. """
+        data = {}
+        data['Comment'] = response
 
-        if self.object_id and not self.__is_draft:
-            return RuntimeError('Not possible to send a message that is not new or a draft. Use Reply or Forward instead.')
+        ep = 'reply'
+        if to_all:
+            ep = 'reply_all'
 
-        if self.__is_draft and self.object_id:
-            url = self.build_url(self._endpoints.get('send_draft').format(id=self.object_id))
-            data = None
-        else:
-            url = self.build_url(self._endpoints.get('send_mail'))
-            data = {self._cc('message'): self.to_api_data()}
-            if save_to_sent_folder is False:
-                data[self._cc('saveToSentItems')] = False
+        url = self.build_url(self._endpoints.get(ep).format(id=self.object_id))
 
         try:
             response = self.con.post(url, data=data)
+            if response.status_code != 202:
+                log.debug('Message failed to be sent. Reason: {}'.format(response.reason))
+                return False
+            return True
         except Exception as e:
             log.error('Message could not be send. Error: {}'.format(str(e)))
             return False
+
+    def send(self, save_to_sent_folder=True, reply_all=False, response=None):
+        """ Sends this message. """
+        if self.object_id and not self.__is_draft:
+            return RuntimeError('Not possible to send a message that is not new or a draft. Use Reply or Forward instead.')
+
+        else:
+            if self.__is_draft and self.object_id:
+                url = self.build_url(self._endpoints.get('send_draft').format(id=self.object_id))
+                data = None
+            else:
+                url = self.build_url(self._endpoints.get('send_mail'))
+                data = {self._cc('message'): self.to_api_data()}
+                if save_to_sent_folder is False:
+                    data[self._cc('saveToSentItems')] = False
+
+            try:
+                response = self.con.post(url, data=data)
+            except Exception as e:
+                log.error('Message could not be send. Error: {}'.format(str(e)))
+                return False
 
         if response.status_code != 202:
             log.debug('Message failed to be sent. Reason: {}'.format(response.reason))
